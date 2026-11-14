@@ -10,3 +10,4 @@ from .models import (
 )
 from .storage import MovieStorage
 from .utils import setup_logging
+from .cache import MovieCache

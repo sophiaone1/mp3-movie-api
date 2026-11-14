@@ -4,24 +4,52 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from src import MovieStorage
-
-SAMPLE_CSV = Path(__file__).parent.parent / "fixtures" / "sample_movies.csv"
+from src import MovieCache, MovieStorage
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    """Test client that uses a temporary database instead of data/movies.db."""
-    monkeypatch.setattr(main, "storage", MovieStorage(tmp_path / "test.db"))
-    return TestClient(main.app)
+def test_storage(tmp_path):
+    return MovieStorage(tmp_path / "test_movies.db")
 
 
 @pytest.fixture
-def upload_sample(client):
-    """Upload the sample CSV and return the response."""
-    def _upload():
-        with open(SAMPLE_CSV, "rb") as f:
-            return client.post(
-                "/upload", files={"file": ("sample_movies.csv", f, "text/csv")}
-            )
-    return _upload
+def client(test_storage, monkeypatch):
+    monkeypatch.setattr(main, "storage", test_storage)
+    monkeypatch.setattr(main, "cache", MovieCache())
+    with TestClient(main.app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def sample_csv_bytes():
+    return (Path("fixtures") / "sample_movies.csv").read_bytes()
+
+
+@pytest.fixture
+def uploaded_movies(client, sample_csv_bytes):
+    response = client.post(
+        "/upload",
+        files={"file": ("sample_movies.csv", sample_csv_bytes, "text/csv")},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.fixture
+def processing_body():
+    return {
+        "validation": {
+            "required_columns": ["title", "release_year", "rating", "genre"],
+            "numeric_columns": ["release_year", "rating"],
+        },
+        "processing": {
+            "remove_duplicates": True,
+            "missing": {"enabled": True, "axis": "rows"},
+            "outliers": {
+                "enabled": True,
+                "columns": ["rating"],
+                "method": "iqr",
+                "threshold": 1.5,
+            },
+        },
+    }
